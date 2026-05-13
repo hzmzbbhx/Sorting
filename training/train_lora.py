@@ -1,3 +1,7 @@
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import torch
 import argparse
 import torch.nn.functional as F
@@ -8,7 +12,6 @@ from dataset import Dataset
 from logger import get_logger
 from tqdm import tqdm
 import numpy as np
-import os
 import random
 import AnomalyCLIP_lib
 from peft import get_peft_model, LoraConfig

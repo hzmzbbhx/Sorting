@@ -142,18 +142,18 @@ class ResidualAttentionBlock(nn.Module):
                     x, x_ori = x
                     x_res = self.attention(self.ln_1(x_ori))
                     x_res, x_ori_res = x_res
-                    x_ori += x_ori_res
+                    x_ori = x_ori + x_ori_res
                     x_ori = x_ori + self.mlp(self.ln_2(x_ori))
-                    x += x_res # skip ffn for the new path
+                    x = x + x_res # skip ffn for the new path
                     # print('hellloooo')
                     return [x, x_ori]
                 else:
                     x, x_ori_1 = x
                     x_res = self.attention(self.ln_1(x_ori_1))
                     x_res, x_ori_res = x_res
-                    x_ori = x_ori_1 +  x_ori_res
+                    x_ori = x_ori_1 + x_ori_res
                     x_ori = x_ori + self.mlp(self.ln_2(x_ori))
-                    x += x_res # skip ffn for the new path
+                    x = x + x_res # skip ffn for the new path
                     x = x_res + x_ori_1
                     x = x + self.mlp(self.ln_2(x))
                     return [x, x_ori]
@@ -164,7 +164,7 @@ class ResidualAttentionBlock(nn.Module):
                     x_res, x_ori_res = x_res
                     x_ori = x + x_ori_res
                     x_ori = x_ori + self.mlp(self.ln_2(x_ori))
-                    x += x_res
+                    x = x + x_res
                     return [x, x_ori]
 
         # singl path before "d"
@@ -226,7 +226,7 @@ class ResidualAttentionBlock_learnable_token(nn.Module):
                     x_res, x_ori_res = x_res
                     x_ori = x + x_ori_res
                     x_ori = x_ori + self.mlp(self.ln_2(x_ori))
-                    x += x_res
+                    x = x + x_res
                     return [x, x_ori]
 
         # singl path before "d"
@@ -352,7 +352,6 @@ class VisionTransformer(nn.Module):
                 self.attn.proj.bias.data = self.transformer.resblocks[-i].attn.out_proj.bias.clone()
                 self.transformer.resblocks[-i].attn = self.attn
 
-    @torch.no_grad()
     def forward(self, x: torch.Tensor, features_list, ori_patch = False, proj_use = True, DPAM_layer = None, ffn = False):
 
         x = self.conv1(x)  # shape = [*, width, grid, grid]

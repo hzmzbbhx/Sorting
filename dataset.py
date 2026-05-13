@@ -32,6 +32,14 @@ def generate_class_info(dataset_name):
         obj_list = ['chest']
     elif dataset_name == 'thyroid':
         obj_list = ['thyroid']
+    elif dataset_name == 'brain':
+        obj_list = ['brain']
+        # === 在这里添加你的数据集 ===
+    elif dataset_name == 'Poker':  # 这个名字要和你训练命令中的 --dataset 参数一致
+        obj_list = ['card']           # 这个名字要和你文件夹名一致
+    elif dataset_name == 'Pokerback':  # 这个名字要和你训练命令中的 --dataset 参数一致
+        obj_list = ['card']           # 这个名字要和你文件夹名一致
+    
     for k, index in zip(obj_list, range(len(obj_list))):
         class_name_map_class_id[k] = index
 

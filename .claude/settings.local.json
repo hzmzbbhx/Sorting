@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python *)",
+      "Bash(Select-Object -Last 30)",
+      "Bash(gh auth *)",
+      "Bash(git config *)",
+      "mcp__github__create_repository",
+      "PowerShell(gh auth *)",
+      "PowerShell(winget install *)"
+    ]
+  }
+}

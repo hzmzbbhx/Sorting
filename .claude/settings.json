@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); gh auth status 2>&1)",
+      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); gh auth login --web --hostname github.com 2>&1)",
+      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); gh auth status --hostname github.com 2>&1; if \\($LASTEXITCODE -ne 0\\) { Write-Output \"Trying token check...\"; if \\(Test-Path \"$env:USERPROFILE\\\\.config\\\\gh\\\\hosts.yml\"\\) { Get-Content \"$env:USERPROFILE\\\\.config\\\\gh\\\\hosts.yml\" } else { Write-Output \"No gh config found\" } })"
+    ]
+  }
+}

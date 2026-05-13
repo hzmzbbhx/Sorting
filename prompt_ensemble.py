@@ -183,8 +183,8 @@ class AnomalyCLIP_PromptLearner(nn.Module):
             tokenized_prompts_pos.append(tokenize(p_pos))
         for p_neg in prompts_neg:
             tokenized_prompts_neg.append(tokenize(p_neg))
-        tokenized_prompts_pos = torch.cat(tokenized_prompts_pos)
-        tokenized_prompts_neg = torch.cat(tokenized_prompts_neg)
+        tokenized_prompts_pos = torch.cat(tokenized_prompts_pos).to(clip_model.token_embedding.weight.device)
+        tokenized_prompts_neg = torch.cat(tokenized_prompts_neg).to(clip_model.token_embedding.weight.device)
         #生成相应的text embedding
         with torch.no_grad():
             embedding_pos = clip_model.token_embedding(tokenized_prompts_pos).type(dtype)

@@ -44,5 +44,5 @@ class IsbiSolver(object):
         print('normal_samples', normal_samples, 'anomaly_samples', anomaly_samples)
 
 if __name__ == '__main__':
-    runner = IsbiSolver(root='/remote-home/iot_zhouqihang/data/ISBI')
+    runner = IsbiSolver(root='D:\\test\\AnomalyCLIP\\ISBI')
     runner.run()

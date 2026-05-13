@@ -1,0 +1,45 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Model checkpoints & pretrained weights
+*.pth
+*.pt
+
+# Dataset folders (large binary data)
+BrainMRI/
+DTD-Synthetic/
+ISBI/
+SDD/
+PokerData/
+Pokerback/
+datasets/
+
+# Results & logs
+results/
+results_lora2/
+results_lora_trainmode/
+runs/
+checkpoint_lora2/
+checkpoint_lora_poker/
+checkpoint_lora_pokerback/
+
+# Office documents
+*.docx
+*.pptx
+~$*.docx
+
+# PPT notes
+ppt汇报.md
+
+# IDE / temp
+.vscode/
+tempCodeRunnerFile.py
+
+# Misc
+logo.ico
+logo.png
+
+# YOLO config (contains local paths)
+yolo_poker.yaml

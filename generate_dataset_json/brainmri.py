@@ -34,5 +34,5 @@ class IsbiSolver(object):
             f.write(json.dumps(info, indent=4) + "\n")
 
 if __name__ == '__main__':
-    runner = IsbiSolver(root='/remote-home/iot_zhouqihang/data/BrainMRI')
+    runner = IsbiSolver(root='D:\\test\\AnomalyCLIP\\BrainMRI')
     runner.run()

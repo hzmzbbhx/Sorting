@@ -35,7 +35,14 @@ def image_level_metrics(results, obj, metric):
     gt = np.array(gt)
     pr = np.array(pr)
     if metric == 'image-auroc':
-        performance = roc_auc_score(gt, pr)
+        # roc_auc_score requires at least two classes in gt
+        unique = np.unique(gt)
+        if unique.shape[0] < 2:
+            import warnings
+            warnings.warn(f"[metrics] image_level_metrics: only one class present in gt for '{obj}'; returning np.nan for image-auroc.")
+            performance = np.nan
+        else:
+            performance = roc_auc_score(gt, pr)
     elif metric == 'image-ap':
         performance = average_precision_score(gt, pr)
 
@@ -49,7 +56,15 @@ def pixel_level_metrics(results, obj, metric):
     gt = np.array(gt)
     pr = np.array(pr)
     if metric == 'pixel-auroc':
-        performance = roc_auc_score(gt.ravel(), pr.ravel())
+        y_true = gt.ravel()
+        y_score = pr.ravel()
+        unique = np.unique(y_true)
+        if unique.shape[0] < 2:
+            import warnings
+            warnings.warn(f"[metrics] pixel_level_metrics: only one class present in gt for '{obj}'; returning np.nan for pixel-auroc.")
+            performance = np.nan
+        else:
+            performance = roc_auc_score(y_true, y_score)
     elif metric == 'pixel-aupro':
         if len(gt.shape) == 4:
             gt = gt.squeeze(1)

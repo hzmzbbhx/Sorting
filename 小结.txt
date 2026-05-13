@@ -1,0 +1,598 @@
+视觉
+智能工业异常检测系统技术报告
+
+基于 YOLO 目标定位与少样本 LoRA 微调的多模态大模型架构
+
+1. 系统概述 (System Overview)
+
+本系统旨在解决复杂工业环境下的微小瑕疵检测问题（如扑克牌出千标记、精密零件划痕）。系统采用 Two-Stage（两阶段） 级联架构：
+
+Stage 1 - 定位层：使用 YOLOv8 从复杂背景中精准定位并裁剪出目标物体（ROI）。
+
+Stage 2 - 质检层：使用基于 AnomalyCLIP 改进的多模态大模型，通过 LoRA (Low-Rank Adaptation) 进行少样本微调，对裁剪后的物体进行像素级异常检测。
+
+该架构的核心优势在于极低的数据需求量（仅需少量正常样本和个位数的异常样本）即可实现高精度的缺陷定位。
+
+2. 核心技术原理 (Core Technologies)
+
+2.1 第一阶段：目标定位 (YOLOv8)
+
+技术：You Only Look Once v8 (Ultralytics)。
+
+作用：在复杂的摄像头画面中（可能包含传送带、桌面、杂物），快速框选出待检测目标。
+
+优势：
+
+抗干扰：将背景噪声（光照变化、杂乱环境）在进入质检模型前剔除。
+
+多目标处理：支持同时检测视野内的多个物体，实现并行质检。
+
+产出：目标边界框坐标 (x1, y1, x2, y2)，用于后续图像裁剪。
+
+2.2 第二阶段：异常检测 (AnomalyCLIP + LoRA)
+
+这是系统的核心大脑，基于 OpenAI 的 CLIP (ViT-L/14) 进行特定领域的改造。
+
+A. 模型架构：AnomalyCLIP
+
+为了让擅长语义理解的 CLIP 也能“看清”微小缺陷，模型做了两处关键修改（见 AnomalyCLIP.py）：
+
+DAPM (双路径注意力机制)：
+
+在视觉编码器 (ViT) 的深层（如第 20 层后），引入 Value-Value Attention。
+
+原理：通过计算 $V \cdot V^T$（类似 Gram 矩阵），强制模型关注特征间的纹理相关性，而非空间语义。这使得模型对划痕、异色、污渍等破坏纹理连续性的缺陷极其敏感。
+
+Deep Prompt Learning (深度提示学习)：
+
+不仅仅在输入端使用文本提示（如 "a photo of a damaged object"），而是在 Transformer 的每一层都注入可学习的上下文向量 (compound_prompts_deeper)。
+
+作用：让模型在特征提取的每个阶段都不断强化对“正常”与“异常”概念的理解。
+
+B. 微调策略：LoRA (低秩自适应)
+
+痛点：全量微调 ViT-L 大模型需要巨大的显存和海量数据，且容易遗忘预训练知识。
+
+解决方案：冻结 CLIP 的原始参数，仅在 Attention 层（qkv, proj）旁路插入低秩矩阵 $A$ 和 $B$ 进行训练。
+
+效果：
+
+少样本 (Few-shot)：仅需 10-20 张图片即可收敛。
+
+参数高效：训练参数量减少 90% 以上。
+
+保留泛化：保留了 CLIP 强大的通用视觉特征，不会因为过拟合某种特定缺陷而无法识别未知缺陷。
+
+C. 损失函数设计 (Loss Function)
+
+训练过程（train_lora.py）结合了三种损失，确保像素级定位能力：
+
+Image Cross Entropy Loss：确保整图分类（OK/NG）正确。
+
+Focal Loss：解决像素不平衡问题（缺陷像素往往只占图像的 1%），让模型关注难分类的像素。
+
+Dice Loss：优化预测掩码与真实掩码（Ground Truth）的重叠度（IoU）。
+
+3. 关键文件与项目结构 (Project Structure)
+
+模块
+
+文件名
+
+功能描述
+
+模型定义
+
+AnomalyCLIP.py
+
+定义了修改后的 CLIP 结构，包括 DAPM 和 Deep Prompt 注入逻辑。
+
+
+
+CLIP.py
+
+原始 CLIP 结构的底层实现。
+
+训练引擎
+
+train_lora.py
+
+核心训练脚本。负责数据加载、LoRA 初始化、Loss 计算及权重保存。
+
+
+
+loss.py
+
+定义 Focal Loss 和 Binary Dice Loss。
+
+推理/应用
+
+yolo_monitior.py
+
+
+
+monitor_lora.py
+
+PC端主程序。集成 YOLO 和 AnomalyCLIP，实现摄像头采集、动态裁剪、实时推理与 UI 显示。
+
+数据处理
+
+dataset.py
+
+封装数据加载逻辑，解析 meta.json，读取图片和掩码。
+
+
+
+utils.py
+
+图像预处理（Resize, Normalize）及辅助函数。
+
+
+
+prompt_ensemble.py
+
+定义 Prompt Learner，负责生成可学习的提示词向量。
+
+4. 完整工作流程 (Workflow)
+
+阶段一：数据准备 (Data Preparation)
+
+YOLO 数据：采集包含物体的场景图，使用 LabelImg 标注 .txt 标签。
+
+AnomalyCLIP 数据：
+
+采集物体的高清特写图（主要是正常样本，少量异常样本）。
+
+使用 json_to_mask.py 将标注转为黑底白色的掩码图（Mask）。
+
+使用 generate_dataset_json 脚本生成 meta.json 索引文件。
+
+阶段二：模型训练 (Training)
+
+训练定位模型 (YOLO)：
+
+运行 yolo detect train。
+
+输入：场景图 + txt标签。
+
+输出：best.pt（学会了“在哪儿”）。
+
+微调质检模型 (AnomalyCLIP)：
+
+运行 train_lora.py。
+
+输入：特写图 + 掩码 + ViT-L/14 预训练权重。
+
+过程：冻结 ViT，更新 LoRA 权重和 Prompt 向量。
+
+输出：epoch_xx.pth (Prompt权重) + lora_epoch_xx (LoRA权重)（学会了“好坏之分”）。
+
+阶段三：实时部署 (Deployment)
+
+运行 yolo_monitior.py：
+
+初始化：加载 best.pt、CLIP 基础模型、LoRA 权重、Prompt 权重。
+
+特征预计算：提前计算好“正常”和“异常”的文本特征向量（Text Embeddings），固化在内存中以加速推理。
+
+循环检测：
+
+摄像头捕获帧 $I$。
+
+YOLO 预测边界框 $B = [x, y, w, h]$。
+
+根据 $B$ 裁剪出 ROI 图像 $I_{crop}$。
+
+AnomalyCLIP 提取 $I_{crop}$ 的图像特征 $F_{img}$ 和 Patch 特征 $F_{patch}$。
+
+计算相似度：$Score = F_{img} \cdot F_{text}$。
+
+生成热力图：计算 $F_{patch}$ 与异常文本特征的局部相似度，经高斯平滑后叠加显示。
+
+反馈：界面显示 NG/OK，热力图高亮缺陷区域。
+
+5. 总结
+
+该系统通过**“先找后看”**的策略，完美结合了工业界对实时性的要求（YOLO）和对微小缺陷检测的高精度要求（AnomalyCLIP）。
+
+泛化性：加载的 ViT-L 权重拥有互联网海量数据的先验知识，这使得模型即使只看这几张图，也能大致理解什么是“物体结构”。
+
+专用性：通过 LoRA 和 Prompt Learning，模型迅速从通用认知收敛到特定的“扑克牌/零件”领域，成为该领域的专家。
+
+
+AnomalyCLIP 模型架构解析
+
+AnomalyCLIP 是一个针对异常检测任务（如工业质检、医学影像分析）定制的视觉-语言模型。它在原版 CLIP（Contrastive Language-Image Pre-training）的基础上，引入了针对“微小缺陷”和“纹理异常”的特定优化。
+
+1. 核心设计理念
+
+传统的 CLIP 模型虽然擅长识别物体（“这是一只猫” vs “这是一只狗”），但往往难以区分同一物体的完美状态与缺陷状态（“完美的瓶子” vs “有划痕的瓶子”）。AnomalyCLIP 通过以下两个核心机制解决了这个问题：
+
+让模型“看”得更清：引入双路径注意力机制，专门捕获纹理细节。
+
+让模型“懂”得更深：引入深度提示学习，让文本编码器能动态调整对“异常”的定义。
+
+2. 关键组件解析
+
+A. 视觉编码器 (Visual Encoder)
+
+基于 Vision Transformer (ViT) 修改
+
+在 AnomalyCLIP.py 中，模型的视觉部分被大幅修改，引入了 DPAM (Dual Path Attention Module)。
+
+双路径设计：
+模型在特定的层（由 DPAM_layer 参数控制，例如第 20 层之后）会将注意力机制分为两条路径：
+
+原始路径 (Original Path)：保留标准的自注意力机制 ($Q \times K^T$)，用于提取物体的全局语义形状特征。
+
+纹理路径 (Texture/Anomaly Path)：这是一个创新的 Value-Value (V-V) Attention。
+
+代码逻辑：强制令 Query = Value, Key = Value。
+
+数学公式：$Attention = \text{softmax}(V \cdot V^T) \cdot V$
+
+作用：这种计算方式模拟了风格迁移中的 Gram 矩阵，它不再关注空间位置，而是极其敏感地捕捉图像的纹理相关性。这使得模型能敏锐地发现如划痕、污渍等破坏纹理一致性的缺陷。
+
+B. 文本编码器 (Text Encoder)
+
+引入深度提示学习 (Deep Prompt Learning)
+
+标准的 CLIP 仅在输入端接收一次文本 Prompt。AnomalyCLIP 在 ResidualAttentionBlock_learnable_token 中实现了深度注入：
+
+机制：不仅在输入层使用 Prompt，还在 Transformer 的**每一层（Layer 1, Layer 2...）**都插入了可学习的向量 (compound_prompts_deeper)。
+
+作用：这允许模型在特征提取的不同深度，不断修正和强化对“正常”与“异常”语义的理解，实现了文本特征与视觉特征的深层对齐。
+
+3. 训练策略 (Training Strategy)
+
+根据 train_lora.py，该模型采用了高效的微调策略：
+
+LoRA (Low-Rank Adaptation)：
+
+对象：仅针对视觉编码器 (Visual Encoder) 的线性层 (qkv, proj, c_fc, c_proj)。
+
+目的：冻结庞大的预训练 CLIP 参数，仅训练极少量的 LoRA 参数。这既保留了 CLIP 强大的通用泛化能力，又让模型快速适应特定的工业场景。
+
+提示词学习 (Prompt Learning)：
+
+同时优化输入层的浅层 Prompt 和隐藏层的深层 Prompt。
+
+损失函数 (Loss Function)：
+模型同时进行图像级分类和像素级分割的训练：
+
+Image Loss：交叉熵损失，判断整张图是 OK 还是 NG。
+
+Pixel Loss：Focal Loss + Dice Loss。
+
+利用生成的像素级异常热力图（通过 Patch Token 与 异常文本特征 的相似度计算得出）与 Ground Truth 掩码进行对比。
+
+Focal Loss 解决正负样本（缺陷点极少）不平衡问题。
+
+Dice Loss 优化缺陷的形状轮廓。
+
+4. 工作流程总结
+
+输入：一张待检测图片 + 一组可学习的 Prompt（代表“正常”和“异常”）。
+
+推理：
+
+视觉端：图片经过 ViT，前几层提取通用特征，后几层通过 V-V Attention 提取纹理异常特征。
+
+文本端：Prompt 经过多层 Transformer，每层都注入新的上下文信息。
+
+判别：
+
+计算 [图像特征] 与 [异常文本特征] 的余弦相似度。
+
+图像级：输出异常分数。
+
+像素级：通过 Patch Token 的相似度生成热力图，定位缺陷位置。
+
+总结
+
+AnomalyCLIP 是一个**“带显微镜的翻译官”**。它不仅继承了 CLIP 听懂人话（语义理解）的能力，还通过 V-V Attention 装上了一副能看清细微纹理的“显微镜”，并通过 LoRA 技术实现了低成本的快速定制。
+
+D1 机械臂 AI 视觉分拣系统技术文档
+
+版本: v1.0
+日期: 2023-10-27
+作者: [您的名字/团队名称]
+
+1. 项目概述 (Project Overview)
+
+本项目旨在构建一套集 AI 视觉识别、异常检测 与 机械臂自动分拣 于一体的智能质检系统。系统通过摄像头实时监控生产线（或工作台），利用深度学习模型识别异常物品，并驱动 D1 三轴机械臂将异常品抓取并移动至废料区。
+
+1.1 核心功能
+
+多目标检测: 使用 YOLO 模型快速定位画面中的多个物体。
+
+异常检测: 结合 AnomalyCLIP 模型，对定位到的物体进行正常/异常（NG/OK）判定。
+
+坐标映射: 将摄像头的 2D 像素坐标转换为机械臂的 3D 空间坐标。
+
+自动分拣: 驱动机械臂执行“检测-抓取-搬运-释放”全流程，具备 S-Curve 平滑加减速控制。
+
+实时监控: 提供 GUI 界面显示实时视频、识别结果、热力图（可选）及运行日志。
+
+2. 系统架构 (System Architecture)
+
+2.1 硬件层
+
+机械臂: D1 三轴机械臂 (SCARA/Serial Hybrid 结构)
+
+执行器：步进电机 x3 + 末端气泵/电磁阀
+
+控制器：ESP32 (MicroPython 固件)
+
+通信：UDP (WiFi)
+
+视觉传感器: USB 工业相机 / 网络摄像头
+
+计算平台: PC (Windows/Linux, 需 NVIDIA GPU 支持 AI 推理)
+
+2.2 软件层 (Python/PyQt5)
+
+系统采用多线程架构，确保界面流畅与逻辑实时性：
+
+模块
+
+类名
+
+职责
+
+主界面 (UI)
+
+MainWindow
+
+显示视频流、控制按钮、参数滑块、日志输出
+
+检测线程
+
+DetectorThread
+
+采集图像 -> YOLO 推理 -> AnomalyCLIP 推理 -> 信号发射
+
+动作线程
+
+RobotActionThread
+
+接收坐标 -> 规划路径 -> 发送指令 -> 等待完成
+
+通信控制
+
+RobotController
+
+封装 UDP 协议、逆运动学解算 (IK)、S-Curve 插补算法
+
+AI 模型
+
+AnomalyDetector
+
+加载 PyTorch 模型，执行前向推理
+
+3. 数学建模与算法 (Modeling & Algorithms)
+
+3.1 机械臂运动学 (Kinematics)
+
+D1 机械臂采用平行四边形连杆结构，具有以下几何特性：
+
+J1 (Base): 底座旋转 (Yaw)。
+
+J2 (Shoulder): 大臂俯仰。
+
+J3 (Elbow): 小臂俯仰。特殊设计：由于机械耦合，J3 电机控制的是小臂相对于地平线的绝对角度，而非相对大臂的夹角。
+
+L4 (End Effector): 吸盘组件。设计假定吸盘始终保持水平姿态。
+
+3.1.1 物理参数 (Model Parameters)
+
+L1_BASE_H  = 15.0 cm  # 底座高度
+L2_ARM     = 12.0 cm  # 大臂长度
+L3_FOREARM = 12.0 cm  # 小臂长度
+L4_HAND_H  = 5.5 cm   # 末端水平偏移
+L4_HAND_V  = 4.0 cm   # 末端垂直偏移
+
+
+3.1.2 逆运动学解算 (Inverse Kinematics)
+
+给定目标坐标 $(x, y, z)$，求解关节角度 $(J1, J2, J3)$：
+
+J1 (底座角):
+
+
+$$J1 = \arctan2(y, x)$$
+
+坐标变换 (剥离末端):
+将末端坐标转换为手腕 (Wrist) 坐标 $(r_{wrist}, z_{wrist})$：
+
+
+$$r_{end} = \sqrt{x^2 + y^2}$$
+
+$$r_{wrist} = r_{end} - L4\_HAND\_H$$
+
+$$z_{wrist} = z + L4\_HAND\_V$$
+
+平面两杆解算 (J2, J3):
+构建三角形 $L2, L3, Hyp$ (Hyp 为手腕到底座肩部的距离)：
+
+
+$$dz = z_{wrist} - L1\_BASE\_H$$
+
+$$dr = r_{wrist}$$
+
+$$Hyp = \sqrt{dr^2 + dz^2}$$
+
+
+利用余弦定理求肘部内角 $\alpha$ 和基础仰角 $\beta$：
+
+
+$$J2 = \beta + \alpha$$
+
+$$J3 = \text{Calculate from vector subtraction}$$
+
+3.2 坐标标定 (Calibration)
+
+将图像像素坐标 $(u, v)$ 映射到机械臂世界坐标 $(X, Y)$。
+采用简单的线性变换模型（假设相机光轴垂直于工作平面）：
+
+$$X_{robot} = \text{OFFSET}_X - (cy - v) \times \text{SCALE}_X$$
+
+$$Y_{robot} = \text{OFFSET}_Y - (u - cx) \times \text{SCALE}_Y$$
+
+SCALE: 0.03 mm/pixel
+
+OFFSET_X: 14.7 cm (画面中心对应的 X 坐标)
+
+3.3 S-Curve 速度规划 (Motion Planning)
+
+为了防止机械臂在高速运动时产生震荡和丢步，实现了梯形加减速插补算法。
+
+原理: 将长距离运动切分为微小的插补段 (Interpolation Steps)。
+
+逻辑:
+
+前 25% 路程：延迟从 START_SPEED 线性减少到 CRUISE_SPEED (加速)。
+
+中间 50% 路程：保持 CRUISE_SPEED (匀速)。
+
+后 25% 路程：延迟从 CRUISE_SPEED 线性增加到 START_SPEED (减速)。
+
+参数:
+
+CRUISE_SPEED: 600 us (用户可调，越小越快)
+
+START_SPEED: 1200 us
+
+STEP: 2.0 度
+
+4. AI 视觉算法流程 (AI Pipeline)
+
+4.1 目标检测 (Object Detection)
+
+模型: YOLOv8 / YOLOv11
+
+输入: 原始视频帧
+
+输出: 多个物体的 Bounding Box $(x1, y1, x2, y2)$
+
+作用: 快速筛选出视野中的所有待检测物品，排除背景干扰。
+
+4.2 异常判别 (Anomaly Detection)
+
+模型: AnomalyCLIP (基于 CLIP 的少样本/零样本异常检测)
+
+Backbone: ViT-L/14@336px
+
+Adapter: LoRA (微调权重)
+
+Prompt: Learnable Prompt Ensembles
+
+输入: YOLO 裁剪出的物体 ROI (Region of Interest)
+
+输出:
+
+Score: 异常得分 (0~1)。超过阈值判定为 NG。
+
+Heatmap: 像素级异常热力图 (指示哪里有问题)。(注：为稳定性暂时屏蔽了热力图显示)
+
+5. 通信协议 (Communication Protocol)
+
+系统采用 UDP 协议与 ESP32 进行无连接通信。
+
+5.1 上行指令 (PC -> ESP32)
+
+格式：cmd,value (纯文本字符串)
+
+Cmd ID
+
+含义
+
+Value 说明
+
+示例
+
+0
+
+电机使能
+
+0=锁定(Enable), 1=释放(Disable)
+
+0,0
+
+1
+
+J1 移动
+
+相对脉冲数 (+/-)
+
+1,100
+
+2
+
+J2 移动
+
+相对脉冲数 (+/-)
+
+2,-50
+
+3
+
+J3 移动
+
+相对脉冲数 (+/-)
+
+3,200
+
+4
+
+设置速度
+
+脉冲延迟 (微秒)
+
+4,600
+
+5
+
+工具控制
+
+1=吸气, 2=停止, 3=释放
+
+5,1
+
+5.2 防丢步机制
+
+由于 UDP 不可靠且 ESP32 单线程，上位机实现了 “阻塞式发送” 策略：
+
+发送轴 1 指令。
+
+计算轴 1 运动所需时间 $T = Steps \times Delay \times 2$。
+
+上位机睡眠 $T + 2ms$。
+
+发送轴 2 指令...
+
+6. 操作指南 (User Guide)
+
+启动: 运行 auto_sorting_system.py。
+
+连接: 输入 ESP32 IP 地址，点击“连接机械臂”。
+
+参数调整:
+
+调整 判定阈值 (推荐 0.35)。
+
+调整 速度 (推荐 600us)。
+
+运行:
+
+点击 “开始自动运行”。
+
+当画面中出现 NG 物品时，系统会自动框选，并驱动机械臂抓取至废料区。
+
+急停: 任何时候点击红色 “急停” 按钮可切断连接并停止发送指令。
+
+7. 已知限制与优化方向
+
+Z轴精度: 目前 Z 轴高度基于固定平面假设，对于高度差异巨大的物体需引入深度相机。
+
+通信实时性: UDP 在网络拥堵时可能丢包，未来可升级为 TCP 或串口通信。
